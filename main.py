@@ -2,6 +2,7 @@
 
 รัน:  uvicorn main:app --host 0.0.0.0 --port 8000
 """
+import json
 from pathlib import Path
 
 import openpyxl
@@ -124,15 +125,21 @@ def summary():
 
 @app.get("/api/zoo-visitors/categories")
 def categories():
-    """คำอธิบายประเภทผู้เข้าชม — เรียกสดจาก Data.go.th CKAN API (datastore_search)"""
+    """คำอธิบายประเภทผู้เข้าชม — เรียกสดจาก Data.go.th CKAN API (datastore_search)
+    ถ้า Data.go.th ปฏิเสธ (เช่นบล็อก IP เซิร์ฟเวอร์ต่างประเทศ) ใช้สำเนาที่ดึงจาก API เดียวกันเก็บไว้"""
+    mode = "live"
     try:
         r = requests.get(CKAN_API, params={"resource_id": RESOURCE_ID, "limit": 100}, timeout=15)
         r.raise_for_status()
         body = r.json()
     except (requests.RequestException, ValueError) as e:
-        raise HTTPException(status_code=502, detail=f"เรียก Data.go.th API ไม่สำเร็จ: {e}")
+        snapshot = XLSX_PATH.parent / "categories_snapshot.json"
+        if not snapshot.exists():
+            raise HTTPException(status_code=502, detail=f"เรียก Data.go.th API ไม่สำเร็จ: {e}")
+        body = json.loads(snapshot.read_text(encoding="utf-8"))
+        mode = f"snapshot (Data.go.th API ตอบกลับ: {type(e).__name__}; ใช้สำเนาที่ดึงจาก API เดียวกันเมื่อ 2026-11-05)"
     return {
-        "source": {**SOURCE, "api": CKAN_API},
+        "source": {**SOURCE, "api": CKAN_API, "mode": mode},
         "fiscal_year": FISCAL_YEAR,
         "count": len(body["result"]["records"]),
         "data": [{"category": x.get("รายการ"), "description": x.get("คำอธิบาย")}
